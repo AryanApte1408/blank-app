@@ -7,4 +7,4 @@ langchain-chroma
 langchain-huggingface
 neo4j
 tqdm
-sqlite-bro==0.7.11
+pysqlite3-binary
