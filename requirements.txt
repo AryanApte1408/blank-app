@@ -1,1 +1,10 @@
 streamlit
+transformers
+torch
+chromadb
+langchain
+langchain-chroma
+langchain-huggingface
+neo4j
+tqdm
+sqlite3-bro
