@@ -1,3 +1,4 @@
+#chat_app.py 
 import streamlit as st
 from rag_pipeline import answer_question
 
@@ -25,8 +26,8 @@ if prompt := st.chat_input("Ask about Syracuse research…"):
         with st.spinner("Thinking…"):
             out = answer_question(prompt, n_ctx=n_ctx)
             st.markdown(out["answer"])
-            if show_sources:
+            if show_sources and "fused_text_blocks" in out:
                 with st.expander("📚 Sources"):
-                    st.write(out.get("fused_text_blocks", [])[:10])
+                    st.write("\n\n".join(out["fused_text_blocks"][:10]))
 
     st.session_state["messages"].append({"role": "assistant", "content": out["answer"]})

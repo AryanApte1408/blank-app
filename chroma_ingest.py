@@ -1,3 +1,4 @@
+#chroma_ingest.py
 import os
 import sqlite3
 import time
@@ -6,32 +7,56 @@ import chromadb
 from chromadb.utils import embedding_functions
 import config_full as config
 
-DB_PATH = config.SQLITE_DB          # ← fix
+DB_PATH = config.SQLITE_DB
 CHROMA_DIR = config.CHROMA_DIR
 BATCH_SIZE = 500
 
+# -------------------- helpers --------------------
+
+def safe_meta(val, default="N/A"):
+    """Ensure metadata is a primitive Chroma accepts."""
+    if val is None:
+        return default
+    if isinstance(val, (int, float, bool)):
+        return val
+    s = str(val).strip()
+    return s if s else default
+
 def split_into_halves(text: str):
+    """Split long text into 2 chunks, avoids overly large embeddings."""
     if not text:
         return []
     mid = len(text) // 2
     return [text[:mid], text[mid:]]
 
 def build_doc(row):
-    rid, researcher, title, authors, info, doi, pub_date, file_name, summary, fulltext = row
-    return (
-        rid,
-        (
-            f"Researcher: {researcher or 'Unknown'}\n"
-            f"Title: {title or 'Untitled'}\n"
-            f"Authors: {authors or 'N/A'}\n"
-            f"Info: {info or 'N/A'}\n"
-            f"DOI: {doi or 'N/A'}\n"
-            f"Publication Date: {pub_date or 'N/A'}\n"
-            f"File: {file_name or 'N/A'}\n\n"
-            f"Summary: {summary or 'N/A'}\n\n"
-            f"Fulltext:\n{fulltext or 'N/A'}"
-        )
+    """
+    row = (
+      id, researcher_name, work_title, authors, info, doi, publication_date,
+      file_name, summary, full_text
     )
+    """
+    rid, researcher, title, authors, info, doi, pub_date, file_name, summary, fulltext = row
+
+    # Skip useless rows — require at least some meaningful content
+    if not (title or summary or fulltext):
+        return None
+
+    text = (
+        f"Researcher: {safe_meta(researcher, 'Unknown')}\n"
+        f"Title: {safe_meta(title, 'Untitled')}\n"
+        f"Authors: {safe_meta(authors)}\n"
+        f"Info: {safe_meta(info)}\n"
+        f"DOI: {safe_meta(doi)}\n"
+        f"Publication Date: {safe_meta(pub_date)}\n"
+        f"File: {safe_meta(file_name)}\n\n"
+        f"Summary: {safe_meta(summary)}\n\n"
+        f"Fulltext:\n{safe_meta(fulltext)}"
+    )
+
+    return rid, text, researcher, title, authors, doi, pub_date, file_name
+
+# -------------------- main ingest --------------------
 
 def main():
     os.makedirs(CHROMA_DIR, exist_ok=True)
@@ -41,11 +66,19 @@ def main():
         model_name="intfloat/e5-base-v2"
     )
 
+    # Start fresh each run
+    try:
+        client.delete_collection("papers_all")
+        print("🗑️ Old collection removed.")
+    except Exception:
+        pass
+
     collection = client.get_or_create_collection(
         name="papers_all",
         embedding_function=embedder
     )
 
+    # Read SQLite rows
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""
@@ -57,7 +90,11 @@ def main():
     rows = cur.fetchall()
     conn.close()
 
-    print(f"🔎 Found {len(rows)} combined rows to ingest.")
+    print(f"🔎 Found {len(rows)} combined rows to ingest (before filtering).")
+
+    # Filter useless rows
+    rows = [r for r in rows if (r[2] or r[8] or r[9])]
+    print(f"📌 After filtering: {len(rows)} rows kept for ingestion.")
 
     total_start = time.time()
     for start in tqdm(range(0, len(rows), BATCH_SIZE), desc="Ingesting", unit="batch"):
@@ -65,26 +102,30 @@ def main():
         docs, ids, metas = [], [], []
 
         for row in batch:
-            rid, text = build_doc(row)
+            built = build_doc(row)
+            if not built:
+                continue
+            rid, text, researcher, title, authors, doi, pub_date, file_name = built
             chunks = split_into_halves(text)
             for i, chunk in enumerate(chunks, start=1):
                 docs.append(chunk)
                 ids.append(f"{rid}_part{i}")
                 metas.append({
-                    "id": rid,
-                    "researcher": row[1] or "Unknown",
-                    "title": row[2] or "Untitled",
-                    "authors": row[3] or "N/A",
-                    "doi": row[5] or "N/A",
-                    "publication_date": row[6] or "N/A",
-                    "file_name": row[7] or "N/A",
+                    "id": safe_meta(rid),
+                    "researcher": safe_meta(researcher, "Unknown"),
+                    "title": safe_meta(title, "Untitled"),
+                    "authors": safe_meta(authors),
+                    "doi": safe_meta(doi),
+                    "publication_date": safe_meta(pub_date),
+                    "file_name": safe_meta(file_name),
                     "chunk": i,
                 })
 
-        batch_start = time.time()
-        collection.add(documents=docs, ids=ids, metadatas=metas)
-        speed = len(docs) / (time.time() - batch_start + 1e-6)
-        print(f"⚡ Batch {start//BATCH_SIZE+1}: {len(docs)} docs at {speed:.2f} docs/sec")
+        if docs:
+            batch_start = time.time()
+            collection.add(documents=docs, ids=ids, metadatas=metas)
+            speed = len(docs) / (time.time() - batch_start + 1e-6)
+            print(f"⚡ Batch {start//BATCH_SIZE+1}: {len(docs)} docs at {speed:.2f} docs/sec")
 
     print(f"✅ Ingestion complete — {len(rows)} works stored in `papers_all`.")
     print(f"⏱️ Total time: {time.time() - total_start:.2f} seconds")

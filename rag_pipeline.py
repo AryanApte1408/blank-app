@@ -1,3 +1,4 @@
+#rag_pipeleine.py
 import re, torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import config_full as config
@@ -25,12 +26,13 @@ def _load_llm():
 def sanitize(blocks, max_chars=6000):
     out, total = [], 0
     for b in blocks:
-        b = re.sub(r"<[^>]+>", " ", b)
-        if 20 < len(b) < 500:
-            if total + len(b) > max_chars:
-                break
-            out.append(b)
-            total += len(b)
+        b = re.sub(r"<[^>]+>", " ", b).strip()
+        if not b or b in ["N/A", "Unknown"]:
+            continue
+        if total + len(b) > max_chars:
+            break
+        out.append(b)
+        total += len(b)
     return out
 
 def build_prompt(question, context):
