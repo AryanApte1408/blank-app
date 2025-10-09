@@ -1,6 +1,6 @@
 import os
 
-SQLITE_DB = os.getenv("SQLITE_DB", r"D:\OSPO\KG-RAG1\researchers_fixed.db")
+#SQLITE_DB = os.getenv("SQLITE_DB", r"D:\OSPO\KG-RAG1\researchers_fixed.db")
 
 NEO4J_URI  = os.getenv("NEO4J_URI",  "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
